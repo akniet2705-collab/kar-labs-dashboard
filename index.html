@@ -273,8 +273,15 @@ body.view-mode .edit-only { display:none !important; }
 .role-badge.viewer { background:rgba(255,255,255,.15); color:#fff; }
 .role-badge.editor { background:rgba(255,255,255,.25); color:#fff; }
 </style>
+<style>
+#gsLoading { position:fixed; inset:0; background:rgba(255,255,255,.92); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:16px; color:#375623; }
+#gsLoading .spinner { width:40px; height:40px; border:4px solid #e0e0e0; border-top-color:#4EA72A; border-radius:50%; animation:spin .8s linear infinite; margin-bottom:14px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+</style>
 </head>
 <body>
+
+<div id="gsLoading"><div class="spinner"></div><div>Загрузка данных из Google Sheets...</div></div>
 
 <!-- ═══ ЭКРАН ВХОДА ══════════════════════════════════════════════════ -->
 <div id="loginOverlay">
@@ -536,7 +543,7 @@ body.view-mode .edit-only { display:none !important; }
   </div>
 </div><!-- /tab-ref -->
 
-<footer>Бюджет расходов 2026 · Данные хранятся локально в браузере</footer>
+<footer>Бюджет расходов 2026 · Данные загружаются из Google Sheets</footer>
 
 <script>
 // ════════════════════════════════════════════════════════════════════
@@ -602,17 +609,87 @@ function checkSession(){
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  GOOGLE SHEETS LOADER
+// ════════════════════════════════════════════════════════════════════
+const GS_CSV_URL = "https://docs.google.com/spreadsheets/d/1VOs3fBZ1oNLJlWh4vvViLLduGi3apecQ/export?format=csv&gid=793718299";
+
+const MONTH_KEYS = {
+  "Январь":"m1","Февраль":"m2","Март":"m3","Апрель":"m4","Май":"m5","Июнь":"m6",
+  "Июль":"m7","Август":"m8","Сентябрь":"m9","Октябрь":"m10","Ноябрь":"m11","Декабрь":"m12"
+};
+
+function parseCSV(text){
+  const lines = text.trim().split("\n").map(l=>l.split(",").map(c=>c.trim().replace(/^"|"$/g,"")));
+  const headers = lines[0];
+  const data = [];
+  for(let i=1;i<lines.length;i++){
+    const row = lines[i];
+    if(!row[0] && !row[1]) continue;
+    const obj = {};
+    headers.forEach((h,j)=>{ obj[h]=row[j]||""; });
+    data.push(obj);
+  }
+  return data;
+}
+
+function csvToInitialData(rows){
+  const blocks = {};
+  const blockOrder = [];
+  rows.forEach(row=>{
+    const block = row["Блок"]||"";
+    const name  = row["Направление"]||"";
+    if(!block || !name) return;
+    if(!blocks[block]){ blocks[block]={block, dirs:[]}; blockOrder.push(block); }
+    const dir = { name, budget: parseFloat(row["Бюджет"])||0 };
+    Object.entries(MONTH_KEYS).forEach(([label, key])=>{
+      dir[key] = parseFloat(row[label])||0;
+    });
+    blocks[block].dirs.push(dir);
+  });
+  return blockOrder.map(b=>blocks[b]);
+}
+
+async function loadFromGoogleSheets(){
+  try {
+    const resp = await fetch(GS_CSV_URL);
+    if(!resp.ok) throw new Error("HTTP "+resp.status);
+    const text = await resp.text();
+    const rows = parseCSV(text);
+    if(rows.length === 0) throw new Error("Нет данных");
+    const parsed = csvToInitialData(rows);
+    // Replace INITIAL_DATA content
+    INITIAL_DATA.length = 0;
+    parsed.forEach(b=>INITIAL_DATA.push(b));
+    // Reload refBlocks from fresh data (don't use cached localStorage)
+    refBlocks = INITIAL_DATA.map((b,i)=>({
+      block: b.block,
+      color: DEFAULT_COLORS[i] || "#4EA72A",
+      dirs: b.dirs.map(d=>({
+        name:d.name, budget:d.budget,
+        m1:d.m1||0,m2:d.m2||0,m3:d.m3||0,m4:d.m4||0,m5:d.m5||0,m6:d.m6||0,
+        m7:d.m7||0,m8:d.m8||0,m9:d.m9||0,m10:d.m10||0,m11:d.m11||0,m12:d.m12||0
+      }))
+    }));
+    console.log("✅ Данные загружены из Google Sheets:", parsed.length, "блоков");
+  } catch(e) {
+    console.warn("⚠ Не удалось загрузить Google Sheets, используются локальные данные:", e.message);
+  } finally {
+    document.getElementById("gsLoading").style.display = "none";
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  ДАННЫЕ
 // ════════════════════════════════════════════════════════════════════
 const QUARTERS = {
-  Q1:["Январь","Февраль","Март"],
-  Q2:["Апрель","Май","Июнь"],
-  Q3:["Июль","Август","Сентябрь"],
-  Q4:["Октябрь","Ноябрь","Декабрь"],
+  Q1:{ labels:["Январь","Февраль","Март"],         keys:["m1","m2","m3"]   },
+  Q2:{ labels:["Апрель","Май","Июнь"],             keys:["m4","m5","m6"]   },
+  Q3:{ labels:["Июль","Август","Сентябрь"],        keys:["m7","m8","m9"]   },
+  Q4:{ labels:["Октябрь","Ноябрь","Декабрь"],     keys:["m10","m11","m12"] },
 };
 const Q_LABELS = { Q1:"I квартал", Q2:"II квартал", Q3:"III квартал", Q4:"IV квартал" };
 const MONTH_TO_Q = {};
-Object.entries(QUARTERS).forEach(([q,ms])=> ms.forEach(m=> MONTH_TO_Q[m]=q));
+Object.entries(QUARTERS).forEach(([q,v])=> v.labels.forEach(m=> MONTH_TO_Q[m]=q));
 
 const DEFAULT_COLORS = ["#4EA72A","#2471a3","#e67e22","#8e44ad","#c0392b","#16a085","#8e44ad","#d35400"];
 
@@ -624,7 +701,7 @@ function loadRefBlocks(){
   return INITIAL_DATA.map((b,i)=>({
     block: b.block,
     color: DEFAULT_COLORS[i] || "#4EA72A",
-    dirs:  b.dirs.map(d=>({name:d.name, budget:d.budget, m1:d.m1||0, m2:d.m2||0, m3:d.m3||0}))
+    dirs:  b.dirs.map(d=>({name:d.name, budget:d.budget, m1:d.m1||0, m2:d.m2||0, m3:d.m3||0, m4:d.m4||0, m5:d.m5||0, m6:d.m6||0, m7:d.m7||0, m8:d.m8||0, m9:d.m9||0, m10:d.m10||0, m11:d.m11||0, m12:d.m12||0}))
   }));
 }
 function saveRefBlocks(){ localStorage.setItem("ref_blocks_2026", JSON.stringify(refBlocks)); }
@@ -793,12 +870,14 @@ function switchTab(id,btn){
 let barC, pieC;
 
 function renderCards(data){
+  const q = document.getElementById("selQuarter").value;
+  const qk = QUARTERS[q].keys;
   const totalB = data.reduce((s,b)=>s+b.dirs.reduce((ss,d)=>ss+d.budget,0),0);
-  const totalF = data.reduce((s,b)=>s+b.dirs.reduce((ss,d)=>ss+getVal(d,"m1")+getVal(d,"m2")+getVal(d,"m3"),0),0);
+  const totalF = data.reduce((s,b)=>s+b.dirs.reduce((ss,d)=>ss+getVal(d,qk[0])+getVal(d,qk[1])+getVal(d,qk[2]),0),0);
   const rem=totalB-totalF, p=pct(totalF,totalB);
   document.getElementById("cards").innerHTML=`
     <div class="card blue">
-      <div class="card-label">Бюджет на квартал</div>
+      <div class="card-label">Бюджет на квартал (${Q_LABELS[q]})</div>
       <div class="card-value">${fmtN(totalB)} сом</div>
     </div>
     <div class="card">
@@ -818,9 +897,11 @@ function renderCards(data){
 }
 
 function renderCharts(data){
+  const q = document.getElementById("selQuarter").value;
+  const qk = QUARTERS[q].keys;
   const labels  = data.map(b=>b.block);
   const budgets = data.map(b=>b.dirs.reduce((s,d)=>s+d.budget,0));
-  const facts   = data.map(b=>b.dirs.reduce((s,d)=>s+getVal(d,"m1")+getVal(d,"m2")+getVal(d,"m3"),0));
+  const facts   = data.map(b=>b.dirs.reduce((s,d)=>s+getVal(d,qk[0])+getVal(d,qk[1])+getVal(d,qk[2]),0));
   if(barC)barC.destroy();
   barC=new Chart(document.getElementById("barChart"),{
     type:"bar",
@@ -841,7 +922,8 @@ function renderCharts(data){
 
 function renderTable(data){
   const q     = document.getElementById("selQuarter").value;
-  const months= QUARTERS[q];
+  const months= QUARTERS[q].labels;
+  const qk = QUARTERS[q].keys;
   const search= document.getElementById("search").value.toLowerCase();
   let html=`<thead><tr>
     <th>Наименование блока</th><th>Наименование направления</th>
@@ -855,7 +937,7 @@ function renderTable(data){
     const rows=blk.dirs.filter(d=>!search||d.name.toLowerCase().includes(search));
     if(!rows.length)return;
     rows.forEach((dir,di)=>{
-      const m1=getVal(dir,"m1"),m2=getVal(dir,"m2"),m3=getVal(dir,"m3");
+      const m1=getVal(dir,qk[0]),m2=getVal(dir,qk[1]),m3=getVal(dir,qk[2]);
       const fact=m1+m2+m3,rem=dir.budget-fact,p=pct(fact,dir.budget);
       bB+=dir.budget;bM1+=m1;bM2+=m2;bM3+=m3;
       html+=`<tr>
@@ -908,7 +990,7 @@ async function addEntry(){
   const desc   = document.getElementById("fDesc").value.trim();
   const amount = parseFloat(document.getElementById("fAmount").value);
   if(!dir||isNaN(amount)||amount<=0){alert("Укажите направление и сумму!");return;}
-  const monthName = QUARTERS[quarter][["m1","m2","m3"].indexOf(month)];
+  const monthName = QUARTERS[quarter].labels[QUARTERS[quarter].keys.indexOf(month)];
 
   // Получить курс на дату транзакции
   const btn = document.querySelector("button[onclick='addEntry()']");
@@ -939,9 +1021,9 @@ function updateDirs(){
 
 function updateMonths(){
   const q=document.getElementById("fQuarter").value;
-  const ms=QUARTERS[q];
+  const qd=QUARTERS[q];
   document.getElementById("fMonth").innerHTML=
-    ms.map((m,i)=>`<option value="m${i+1}">${m}</option>`).join("");
+    qd.keys.map((k,i)=>`<option value="${k}">${qd.labels[i]}</option>`).join("");
 }
 
 // Синхронизация всех вкладок одновременно
@@ -1409,7 +1491,7 @@ function addDir(bi){
   const bud  = parseFloat(document.getElementById(`ref-new-bud-${bi}`).value)||0;
   if(!name){ alert("Введите название направления!"); return; }
   if(refBlocks[bi].dirs.find(d=>d.name===name)){ alert("Такое направление уже есть!"); return; }
-  refBlocks[bi].dirs.push({name, budget:bud, m1:0, m2:0, m3:0});
+  refBlocks[bi].dirs.push({name, budget:bud, m1:0, m2:0, m3:0, m4:0, m5:0, m6:0, m7:0, m8:0, m9:0, m10:0, m11:0, m12:0});
   saveRefBlocks();
   syncAll(); renderRef(); updateFormBlocks();
 }
@@ -1481,13 +1563,16 @@ function updateFormBlocks(){
 // ════════════════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════════════════
-document.addEventListener("DOMContentLoaded",()=>{
+// Initialize
+document.addEventListener("DOMContentLoaded", async function init(){
   checkUrlData(); // ← загружаем данные из ссылки если есть
+  await loadFromGoogleSheets();
   checkSession(); // ← восстанавливаем сессию если вкладка не закрывалась
   document.getElementById("fDate").value=new Date().toISOString().split("T")[0];
   updateFormBlocks();
   updateDirs();
   updateMonths();
+  renderRef();
   render();
 });
 </script>
