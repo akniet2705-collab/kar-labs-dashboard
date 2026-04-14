@@ -277,9 +277,25 @@ body.view-mode .edit-only { display:none !important; }
 #gsLoading { position:fixed; inset:0; background:rgba(255,255,255,.92); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:16px; color:#375623; }
 #gsLoading .spinner { width:40px; height:40px; border:4px solid #e0e0e0; border-top-color:#4EA72A; border-radius:50%; animation:spin .8s linear infinite; margin-bottom:14px; }
 @keyframes spin { to { transform:rotate(360deg); } }
+
+/* ── TOAST УВЕДОМЛЕНИЯ ── */
+#toast-container { position:fixed; bottom:28px; right:28px; z-index:99999; display:flex; flex-direction:column; gap:10px; pointer-events:none; }
+.toast { display:flex; align-items:center; gap:10px; padding:13px 18px; border-radius:10px; font-size:13px; font-weight:600; color:#fff; box-shadow:0 4px 18px rgba(0,0,0,.22); pointer-events:auto; min-width:240px; max-width:380px; animation:toastIn .3s ease; }
+.toast.success { background:linear-gradient(135deg,#2e7d32,#4EA72A); }
+.toast.error   { background:linear-gradient(135deg,#c62828,#e53935); }
+.toast.info    { background:linear-gradient(135deg,#1565c0,#1976d2); }
+.toast.warning { background:linear-gradient(135deg,#e65100,#f57c00); }
+.toast .toast-icon { font-size:18px; flex-shrink:0; }
+.toast .toast-msg  { flex:1; line-height:1.4; }
+.toast .toast-close { cursor:pointer; opacity:.7; font-size:16px; padding:0 2px; }
+.toast .toast-close:hover { opacity:1; }
+.toast.hide { animation:toastOut .3s ease forwards; }
+@keyframes toastIn  { from { opacity:0; transform:translateX(60px); } to { opacity:1; transform:translateX(0); } }
+@keyframes toastOut { from { opacity:1; transform:translateX(0); } to { opacity:0; transform:translateX(60px); } }
 </style>
 </head>
 <body>
+<div id="toast-container"></div>
 
 <div id="gsLoading"><div class="spinner"></div><div>Загрузка данных из Google Sheets...</div></div>
 
@@ -551,6 +567,19 @@ body.view-mode .edit-only { display:none !important; }
 
 <script>
 // ════════════════════════════════════════════════════════════════════
+//  TOAST УВЕДОМЛЕНИЯ
+// ════════════════════════════════════════════════════════════════════
+function showToast(msg, type='success', duration=3500){
+  const icons = { success:'✅', error:'❌', info:'ℹ️', warning:'⚠️' };
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.innerHTML = `<span class="toast-icon">${icons[type]||'ℹ️'}</span><span class="toast-msg">${msg}</span><span class="toast-close" onclick="this.parentElement.remove()">✕</span>`;
+  container.appendChild(el);
+  setTimeout(()=>{ el.classList.add('hide'); setTimeout(()=>el.remove(), 300); }, duration);
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  ПАРОЛИ ДОСТУПА  ← меняйте здесь
 // ════════════════════════════════════════════════════════════════════
 const PASSWORDS = {
@@ -726,9 +755,11 @@ async function switchYear(year){
 }
 
 async function reloadData(){
+  showToast("Обновляю данные из Google Sheets...", "info", 2000);
   await loadFromGoogleSheets(currentYear);
   syncAll();
   renderRef();
+  showToast("Данные обновлены из Google Sheets ✓", "success");
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1034,7 +1065,7 @@ function renderTable(data){
 }
 
 async function addEntry(){
-  if(currentRole !== "editor"){ alert("⛔ Нет прав на редактирование"); return; }
+  if(currentRole !== "editor"){ showToast("Нет прав на редактирование", "error"); return; }
   const block  = document.getElementById("fBlock").value;
   const dir    = document.getElementById("fDir").value.trim();
   const quarter= document.getElementById("fQuarter").value;
@@ -1042,7 +1073,7 @@ async function addEntry(){
   const date   = document.getElementById("fDate").value;
   const desc   = document.getElementById("fDesc").value.trim();
   const amount = parseFloat(document.getElementById("fAmount").value);
-  if(!dir||isNaN(amount)||amount<=0){alert("Укажите направление и сумму!");return;}
+  if(!dir||isNaN(amount)||amount<=0){showToast("Укажите направление и сумму!", "warning");return;}
   const monthName = QUARTERS[quarter].labels[QUARTERS[quarter].keys.indexOf(month)];
 
   // Получить курс на дату транзакции
@@ -1062,6 +1093,7 @@ async function addEntry(){
   document.getElementById("usdPreview").textContent="—";
   document.getElementById("rateHint").textContent="";
   render();
+  showToast(`Расход добавлен: ${dir} — ${amount.toLocaleString()} сом`, "success");
 }
 
 function updateDirs(){
@@ -1106,6 +1138,7 @@ function exportCSV(){
   const a=document.createElement("a");
   a.href="data:text/csv;charset=utf-8,"+encodeURIComponent("\ufeff"+csv);
   a.download="бюджет_2026.csv";a.click();
+  showToast("CSV файл скачан!", "success");
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1153,9 +1186,9 @@ function importData(event){
       updateFormBlocks();
       render();
       renderSvod();
-      alert("✅ Данные успешно загружены!");
+      showToast("Данные успешно загружены!", "success");
     } catch(err){
-      alert("❌ Ошибка чтения файла: " + err.message);
+      showToast("Ошибка чтения файла: " + err.message, "error");
     }
     event.target.value = ""; // сбрасываем input для повторного импорта
   };
@@ -1176,7 +1209,7 @@ function shareData(){
       showSharePrompt(url);
     }
   } catch(e){
-    alert("Не удалось создать ссылку: " + e.message);
+    showToast("Не удалось создать ссылку: " + e.message, "error");
   }
 }
 
@@ -1219,7 +1252,7 @@ function checkUrlData(){
     saveHiddenBase();
     // Убираем данные из URL (чистим адресную строку)
     history.replaceState(null, "", window.location.pathname);
-    alert("✅ Данные из ссылки успешно загружены!");
+    showToast("Данные из ссылки успешно загружены!", "success");
   } catch(e){
     console.warn("Не удалось прочитать данные из URL:", e);
   }
@@ -1398,7 +1431,7 @@ function resetBudgets(){
 }
 
 function delEntry(i){
-  if(currentRole !== "editor"){ alert("⛔ Нет прав на редактирование"); return; }
+  if(currentRole !== "editor"){ showToast("Нет прав на редактирование", "error"); return; }
   if(!confirm("Удалить эту запись?")) return;
   extras.splice(i,1);
   saveExtras();
@@ -1489,11 +1522,11 @@ function renderRef(){
 // ── Блоки ──────────────────────────────────────────────────────────
 
 function addBlock(){
-  if(currentRole !== "editor"){ alert("⛔ Нет прав на редактирование"); return; }
+  if(currentRole !== "editor"){ showToast("Нет прав на редактирование", "error"); return; }
   const name = document.getElementById("refNewBlock").value.trim();
   const color= document.getElementById("refNewColor").value;
-  if(!name){ alert("Введите название блока!"); return; }
-  if(refBlocks.find(b=>b.block===name)){ alert("Такой блок уже есть!"); return; }
+  if(!name){ showToast("Введите название блока!", "warning"); return; }
+  if(refBlocks.find(b=>b.block===name)){ showToast("Такой блок уже есть!", "warning"); return; }
   refBlocks.push({block:name, color, dirs:[]});
   saveRefBlocks();
   document.getElementById("refNewBlock").value="";
@@ -1542,8 +1575,8 @@ function saveBlockName(bi){
 function addDir(bi){
   const name = document.getElementById(`ref-new-dir-${bi}`).value.trim();
   const bud  = parseFloat(document.getElementById(`ref-new-bud-${bi}`).value)||0;
-  if(!name){ alert("Введите название направления!"); return; }
-  if(refBlocks[bi].dirs.find(d=>d.name===name)){ alert("Такое направление уже есть!"); return; }
+  if(!name){ showToast("Введите название направления!", "warning"); return; }
+  if(refBlocks[bi].dirs.find(d=>d.name===name)){ showToast("Такое направление уже есть!", "warning"); return; }
   refBlocks[bi].dirs.push({name, budget:bud, m1:0, m2:0, m3:0, m4:0, m5:0, m6:0, m7:0, m8:0, m9:0, m10:0, m11:0, m12:0});
   saveRefBlocks();
   syncAll(); renderRef(); updateFormBlocks();
