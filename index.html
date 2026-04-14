@@ -308,6 +308,10 @@ body.view-mode .edit-only { display:none !important; }
     <div class="subtitle">Валюта: Кыргызский сом (KGS) · Учёт · Контроль · Анализ</div>
   </div>
   <div class="hdr-btns">
+    <select id="yearSelect" onchange="switchYear(this.value)" style="background:#375623;color:#fff;border:1px solid #4EA72A;border-radius:5px;padding:5px 10px;font-weight:bold;cursor:pointer;font-size:13px;">
+    </select>
+    <span id="yearBadge" style="background:#4EA72A;color:#fff;padding:5px 12px;border-radius:5px;font-weight:bold;font-size:13px;">2026</span>
+    <button class="btn btn-gray btn-sm" onclick="reloadData()" title="Обновить данные из Google Sheets">🔄 Обновить</button>
     <span id="roleBadge" class="role-badge"></span>
     <button class="btn btn-blue" onclick="exportCSV()">⬇ CSV</button>
     <button class="btn btn-blue" onclick="exportData()" title="Скачать все данные как файл резервной копии">💾 Экспорт</button>
@@ -543,7 +547,7 @@ body.view-mode .edit-only { display:none !important; }
   </div>
 </div><!-- /tab-ref -->
 
-<footer>Бюджет расходов 2026 · Данные загружаются из Google Sheets</footer>
+<footer>Бюджет расходов · Данные из Google Sheets · При добавлении нового года — добавь лист в таблицу и год в AVAILABLE_YEARS</footer>
 
 <script>
 // ════════════════════════════════════════════════════════════════════
@@ -609,9 +613,15 @@ function checkSession(){
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  GOOGLE SHEETS LOADER
+//  GOOGLE SHEETS CONFIG
 // ════════════════════════════════════════════════════════════════════
-const GS_CSV_URL = "https://docs.google.com/spreadsheets/d/1VOs3fBZ1oNLJlWh4vvViLLduGi3apecQ/export?format=csv&gid=793718299";
+const SPREADSHEET_ID = "1VOs3fBZ1oNLJlWh4vvViLLduGi3apecQ";
+const AVAILABLE_YEARS = [2026, 2027];
+let currentYear = 2026;
+
+function gsURL(sheetName){
+  return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+}
 
 const MONTH_KEYS = {
   "Январь":"m1","Февраль":"m2","Март":"m3","Апрель":"m4","Май":"m5","Июнь":"m6",
@@ -619,11 +629,11 @@ const MONTH_KEYS = {
 };
 
 function parseCSV(text){
-  const lines = text.trim().split("\n").map(l=>l.split(",").map(c=>c.trim().replace(/^"|"$/g,"")));
-  const headers = lines[0];
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",").map(c=>c.trim().replace(/^"|"$/g,""));
   const data = [];
   for(let i=1;i<lines.length;i++){
-    const row = lines[i];
+    const row = lines[i].split(",").map(c=>c.trim().replace(/^"|"$/g,""));
     if(!row[0] && !row[1]) continue;
     const obj = {};
     headers.forEach((h,j)=>{ obj[h]=row[j]||""; });
@@ -632,50 +642,93 @@ function parseCSV(text){
   return data;
 }
 
-function csvToInitialData(rows){
-  const blocks = {};
+function buildFromSheets(refRows, dataRows){
+  // Build block structure from Справочник
+  const blockColors = {};
+  const blockDirs = {};
   const blockOrder = [];
-  rows.forEach(row=>{
+  refRows.forEach(row=>{
     const block = row["Блок"]||"";
-    const name  = row["Направление"]||"";
-    if(!block || !name) return;
-    if(!blocks[block]){ blocks[block]={block, dirs:[]}; blockOrder.push(block); }
-    const dir = { name, budget: parseFloat(row["Бюджет"])||0 };
-    Object.entries(MONTH_KEYS).forEach(([label, key])=>{
-      dir[key] = parseFloat(row[label])||0;
-    });
-    blocks[block].dirs.push(dir);
+    const dir   = row["Направление"]||"";
+    const color = row["Цвет"]||"#4EA72A";
+    if(!block) return;
+    if(!blockColors[block]){ blockColors[block]=color; blockOrder.push(block); blockDirs[block]=[]; }
+    if(dir) blockDirs[block].push(dir);
   });
-  return blockOrder.map(b=>blocks[b]);
-}
 
-async function loadFromGoogleSheets(){
-  try {
-    const resp = await fetch(GS_CSV_URL);
-    if(!resp.ok) throw new Error("HTTP "+resp.status);
-    const text = await resp.text();
-    const rows = parseCSV(text);
-    if(rows.length === 0) throw new Error("Нет данных");
-    const parsed = csvToInitialData(rows);
-    // Replace INITIAL_DATA content
-    INITIAL_DATA.length = 0;
-    parsed.forEach(b=>INITIAL_DATA.push(b));
-    // Reload refBlocks from fresh data (don't use cached localStorage)
-    refBlocks = INITIAL_DATA.map((b,i)=>({
-      block: b.block,
-      color: DEFAULT_COLORS[i] || "#4EA72A",
-      dirs: b.dirs.map(d=>({
-        name:d.name, budget:d.budget,
+  // Build data lookup from year sheet
+  const dataMap = {};
+  dataRows.forEach(row=>{
+    const key = `${row["Блок"]}::${row["Направление"]}`;
+    const d = { budget: parseFloat(row["Бюджет"])||0 };
+    Object.entries(MONTH_KEYS).forEach(([label,mkey])=>{ d[mkey]=parseFloat(row[label])||0; });
+    dataMap[key] = d;
+  });
+
+  // Merge
+  return blockOrder.map((block,i)=>({
+    block,
+    color: blockColors[block],
+    dirs: blockDirs[block].map(name=>{
+      const d = dataMap[`${block}::${name}`] || {};
+      return {
+        name,
+        budget: d.budget||0,
         m1:d.m1||0,m2:d.m2||0,m3:d.m3||0,m4:d.m4||0,m5:d.m5||0,m6:d.m6||0,
         m7:d.m7||0,m8:d.m8||0,m9:d.m9||0,m10:d.m10||0,m11:d.m11||0,m12:d.m12||0
-      }))
+      };
+    })
+  }));
+}
+
+async function loadFromGoogleSheets(year){
+  year = year || currentYear;
+  document.getElementById("gsLoading").style.display = "flex";
+  try {
+    const [refResp, dataResp] = await Promise.all([
+      fetch(gsURL("Справочник")),
+      fetch(gsURL(String(year)))
+    ]);
+    if(!refResp.ok || !dataResp.ok) throw new Error("Ошибка загрузки");
+    const [refText, dataText] = await Promise.all([refResp.text(), dataResp.text()]);
+    const refRows  = parseCSV(refText);
+    const dataRows = parseCSV(dataText);
+    if(!refRows.length) throw new Error("Справочник пуст");
+
+    const merged = buildFromSheets(refRows, dataRows);
+    INITIAL_DATA.length = 0;
+    merged.forEach(b=>INITIAL_DATA.push(b));
+    refBlocks = merged.map(b=>({
+      block: b.block,
+      color: b.color || "#4EA72A",
+      dirs: b.dirs.map(d=>({...d}))
     }));
-    console.log("✅ Данные загружены из Google Sheets:", parsed.length, "блоков");
-  } catch(e) {
-    console.warn("⚠ Не удалось загрузить Google Sheets, используются локальные данные:", e.message);
+    currentYear = year;
+    document.getElementById("yearBadge").textContent = year;
+    console.log(`✅ Данные загружены: ${year}, ${merged.length} блоков`);
+  } catch(e){
+    console.warn("⚠ Не удалось загрузить Google Sheets:", e.message);
+    // fallback: keep existing data
   } finally {
     document.getElementById("gsLoading").style.display = "none";
   }
+}
+
+async function switchYear(year){
+  year = parseInt(year);
+  if(year === currentYear) return;
+  extras = [];
+  hiddenBase.clear();
+  customBudgets = {};
+  await loadFromGoogleSheets(year);
+  syncAll();
+  renderRef();
+}
+
+async function reloadData(){
+  await loadFromGoogleSheets(currentYear);
+  syncAll();
+  renderRef();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1566,7 +1619,17 @@ function updateFormBlocks(){
 // Initialize
 document.addEventListener("DOMContentLoaded", async function init(){
   checkUrlData(); // ← загружаем данные из ссылки если есть
-  await loadFromGoogleSheets();
+  // Populate year selector
+  const ys = document.getElementById("yearSelect");
+  if(ys){
+    AVAILABLE_YEARS.forEach(y=>{
+      const opt = document.createElement("option");
+      opt.value = y; opt.textContent = y + " год";
+      if(y === currentYear) opt.selected = true;
+      ys.appendChild(opt);
+    });
+  }
+  await loadFromGoogleSheets(currentYear);
   checkSession(); // ← восстанавливаем сессию если вкладка не закрывалась
   document.getElementById("fDate").value=new Date().toISOString().split("T")[0];
   updateFormBlocks();
