@@ -947,9 +947,7 @@ async function loadFromGoogleSheets(year){
             usdRate: r.usdRate ? parseNum(r.usdRate) : null,
             rateDate: r.rateDate||"", desc: r.desc||""
           }));
-          const sheetIds = new Set(sheetExtras.filter(e=>e.id).map(e=>e.id));
-          const localOnly = extras.filter(e => e.id && !sheetIds.has(e.id));
-          extras = [...sheetExtras, ...localOnly];
+          extras = [...sheetExtras];
           saveExtras();
           console.log(`✅ Расходы загружены из Sheets: ${extras.length} записей`);
         }
@@ -973,9 +971,7 @@ async function loadFromGoogleSheets(year){
             usdRate: r.usdRate ? parseNum(r.usdRate) : null,
             rateDate: r.rateDate||""
           }));
-          const sheetIncIds = new Set(sheetInc.filter(e=>e.id).map(e=>e.id));
-          const localIncOnly = incomes.filter(e => e.id && !sheetIncIds.has(e.id));
-          incomes = [...sheetInc, ...localIncOnly];
+          incomes = [...sheetInc];
           saveIncomes();
           console.log(`✅ Доходы загружены из Sheets: ${incomes.length} записей`);
         }
