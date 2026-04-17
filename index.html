@@ -1274,17 +1274,29 @@ function renderCards(data){
   const totalB = data.reduce((s,b)=>s+b.dirs.reduce((ss,d)=>ss+d.budget,0),0);
   const totalF = data.reduce((s,b)=>s+b.dirs.reduce((ss,d)=>ss+getVal(d,qk[0])+getVal(d,qk[1])+getVal(d,qk[2]),0),0);
   const rem=totalB-totalF, p=pct(totalF,totalB);
-  const totalIncome = filterIncByQ(incomes, q).reduce((s,e)=>s+e.amount,0);
+  const filteredInc = filterIncByQ(incomes, q);
+  const totalIncome = filteredInc.reduce((s,e)=>s+e.amount,0);
+  const totalIncUsd = filteredInc.reduce((s,e)=>s+(e.amountUsd||0),0);
   const netProfit = totalIncome - totalF;
+  // USD для расходов: берём из extras по кварталу
+  const filteredExp = extras.filter(e => {
+    if(q==="all") return !e.date || e.date.startsWith(String(currentYear));
+    return e.quarter === q && (!e.date || e.date.startsWith(String(currentYear)));
+  });
+  const totalExpUsd = filteredExp.reduce((s,e)=>s+(e.amountUsd||0),0);
+  const totalNetUsd = totalIncUsd - totalExpUsd;
+  const incCount = filteredInc.length;
+  const expCount = filteredExp.length;
   document.getElementById("cards").innerHTML=`
     <div class="card purple">
       <div class="card-label">💹 Доходы (всего)</div>
       <div class="card-value">${fmtN(totalIncome)} сом</div>
+      ${totalIncUsd>0?`<div class="card-sub">≈ $${totalIncUsd.toLocaleString("ru-RU",{maximumFractionDigits:0})} · ${incCount} ${incCount===1?"запись":incCount<5?"записи":"записей"}</div>`:''}
     </div>
     <div class="card ${netProfit>=0?'':'red'}">
       <div class="card-label">📈 Чистая прибыль</div>
       <div class="card-value ${netProfit>=0?'profit-positive':'profit-negative'}">${netProfit>=0?'+':''}${fmtN(netProfit)} сом</div>
-      <div class="card-sub">${netProfit>=0?'Прибыль 🟢':'Убыток 🔴'}</div>
+      <div class="card-sub">${netProfit>=0?'Прибыль 🟢':'Убыток 🔴'}${totalNetUsd!==0?` · ≈ ${totalNetUsd>=0?'+':''}$${Math.abs(totalNetUsd).toLocaleString("ru-RU",{maximumFractionDigits:0})}`:''}</div>
     </div>
     <div class="card blue">
       <div class="card-label">Бюджет на квартал (${Q_LABELS[q]})</div>
@@ -1293,7 +1305,7 @@ function renderCards(data){
     <div class="card">
       <div class="card-label">Фактические расходы</div>
       <div class="card-value">${fmtN(totalF)} сом</div>
-      <div class="card-sub">Из бюджета: ${p}%</div>
+      <div class="card-sub">Из бюджета: ${p}%${totalExpUsd>0?` · ≈ $${totalExpUsd.toLocaleString("ru-RU",{maximumFractionDigits:0})}`:''}${expCount>0?` · ${expCount} ${expCount===1?"запись":expCount<5?"записи":"записей"}`:''}</div>
     </div>
     <div class="card ${rem<0?'red':'orange'}">
       <div class="card-label">Остаток бюджета</div>
